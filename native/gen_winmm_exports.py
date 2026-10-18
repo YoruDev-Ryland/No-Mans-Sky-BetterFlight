@@ -29,7 +29,7 @@ ORDINAL_SOURCE = "winmm_windows_11-24H2.exports"
 def read(path):
     """[(ordinal, name or None)]"""
     rows = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if len(parts) >= 2 and parts[0].isdigit():
             rows.append((int(parts[0]), None if parts[1] == "-" else parts[1]))
@@ -55,7 +55,7 @@ def main():
         raise SystemExit(f"non-identifier export names: {bad}")
     needed = REF / "winmm_imported_by_game_folder.txt"
     if needed.exists():
-        missing = {l.strip() for l in needed.read_text().splitlines() if l.strip()} - have - set(extra)
+        missing = {l.strip() for l in needed.read_text(encoding="utf-8").splitlines() if l.strip()} - have - set(extra)
         if missing:
             raise SystemExit(f"game-folder modules import names not in the export set: {sorted(missing)}")
 
@@ -68,8 +68,9 @@ def main():
         else:
             inc.append(f"WINMM_EXPORT_ORD({i}, {o})")
             df.append(f"    bf_x_ord_{o} @{o} NONAME")
-    (HERE / "src" / "winmm_exports.inc").write_text("\n".join(inc) + "\n")
-    (HERE / "src" / "winmm.def").write_text("\n".join(df) + "\n")
+    # LF on every OS, so the tracked generated files never show as modified on Windows
+    (HERE / "src" / "winmm_exports.inc").write_bytes(("\n".join(inc) + "\n").encode("utf-8"))
+    (HERE / "src" / "winmm.def").write_bytes(("\n".join(df) + "\n").encode("utf-8"))
 
     unnamed = sum(1 for _, n in ordered if not n)
     print(f"winmm exports: {len(ordered)} ({len(ordered) - unnamed} named, {unnamed} ordinal-only); "

@@ -3,22 +3,35 @@
 Star Citizen-style flight for No Man's Sky: real strafing, momentum, the ability
 to stop, and no forced banking.
 
-Windows and Linux (Proton) — same files. See [RESEARCH.md](RESEARCH.md) for the
-technical background.
+The mod runs on Windows and on Linux (Proton) — the same files on both. **Players:**
+use the release zip from Nexus, nothing to build. This README is for building from
+source, which also works on both. See [RESEARCH.md](RESEARCH.md) for the technical
+background.
 
 ---
 
-## Install
+## Build and install from source
 
-**Quit the game first**, then:
+Needs Python 3 (3.12+ recommended) and No Man's Sky installed through Steam. On
+Linux, also Wine (the DLL's tests run under it; on Windows they run natively).
+Everything else is fetched by `setup_tools.py` into `tools/`, user-local, no admin:
+.NET 8 runtime, HGPAKtool, MBINCompiler (the version that matches your game build)
+and llvm-mingw (the C compiler).
+
+**Quit the game first.** Linux: run the scripts directly (`./install.py`) or with
+`python3`. Windows: `py install.py`.
 
 ```bash
-./install.py            # builds and installs everything
-./install.py --status   # what's installed + tail of the in-game log
-./install.py --uninstall
+python3 setup_tools.py        # once, and after every game update
+python3 install.py            # builds and installs everything
+python3 install.py --status   # what's installed + tail of the in-game log
+python3 install.py --uninstall
 ```
 
-After a game update: `./update.sh`.
+After a game update: `python3 update.py` (`setup_tools.py` then `install.py`).
+
+If the game isn't found, set `NMS_PATH` to the folder containing `Binaries` and
+`GAMEDATA`.
 
 On Linux the installer writes the one Wine DLL override the mod needs straight
 into the game's Proton prefix (backing up `user.reg` first), so **no Steam launch
@@ -79,7 +92,7 @@ with the game running.
 | `Debug` | 1 | per-second flight telemetry in `BetterFlight.log` |
 
 The rest of the feel — momentum, stopping, roll coupling — is the flight retune. Its
-tables live in `build_mod.py` (`SPACE` / `ATMOS` / `GLOBAL_TUNING`). `native/build.sh`
+tables live in `build_mod.py` (`SPACE` / `ATMOS` / `GLOBAL_TUNING`). `native/build.py`
 generates `native/src/flight_tuning.inc` from them, and the DLL applies them in memory
 (RESEARCH.md §16). Changing a table needs a rebuild; `FlightRetune` works live.
 
@@ -138,14 +151,14 @@ logged as `SKIP (...)` with the reason, every few seconds.
 | `SKIP (...)` lines | strafe found a problem each frame; the reason is in the line |
 | `sig ... FAIL` | Game patch changed code; strafe disabled, game unaffected |
 | Strafe goes the wrong way | `InvertLateral` / `InvertVertical` |
-| A/D still roll | Controls mod not installed, or toolchain stale — run `./update.sh` |
+| A/D still roll | Controls mod not installed, or toolchain stale — run `update.py` |
 
 ---
 
 ## Making a release
 
 ```bash
-./package.py
+python3 package.py      # Windows: py package.py
 ```
 
 Rebuilds everything against the installed game, round-trip-checks the controls data
@@ -169,13 +182,13 @@ Licence: MIT (`LICENSE`). Third-party notices: `THIRD-PARTY-LICENSES.txt`.
 install.py         one-shot build + install + uninstall (your own game)
 package.py         build a Nexus release zip
 release/           player README, Nexus page text, Linux override helper
-update.sh          run after a game update
+update.py          run after a game update (update.sh: Linux shortcut)
 controls.ini       key layout + live tuning (single source of truth)
 build_mod.py       flight retune tables (compiled into the DLL; --diff lists them)
 controls_mod.py    data: vanilla key relocation
-setup_tools.py     picks the MBINCompiler that matches the installed game
+setup_tools.py     installs the toolchain; picks the MBINCompiler matching the game
 common.py          game discovery, build detection, round-trip verification
-native/            the DLL (C + vendored MinHook), build.sh
+native/            the DLL (C + vendored MinHook), build.py
 strafe_test.py     superseded probe that proved the strafe actions are unused
-tools/             llvm-mingw, MBINCompiler, HGPAKtool (all user-local, no sudo)
+tools/             llvm-mingw, MBINCompiler, HGPAKtool (all user-local, no admin)
 ```

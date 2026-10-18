@@ -33,12 +33,12 @@ MARK     = "winmm"
 
 
 def game_running():
-    r = subprocess.run(["pgrep", "-f", r"No Man's Sky/Binaries/NMS\.exe|\\NMS\.exe"],
-                       capture_output=True, text=True)
-    return bool(r.stdout.strip())
+    return C.game_running()
 
 
 def sh(cmd):
+    if str(cmd[0]).endswith(".py"):          # Windows can't execute .py files directly
+        cmd = [sys.executable, *cmd]
     print(f"\n$ {' '.join(str(c) for c in cmd)}")
     r = subprocess.run([str(c) for c in cmd], cwd=C.ROOT)
     if r.returncode != 0:
@@ -159,7 +159,7 @@ def main():
     C.require_current_toolchain()
     sh([C.ROOT / "build_mod.py", "--uninstall"])   # the DLL applies the retune now
     sh([C.ROOT / "controls_mod.py"])
-    sh([C.ROOT / "native" / "build.sh"])
+    sh([C.ROOT / "native" / "build.py"])
 
     shutil.copy2(DLL_SRC, DLL_DST)
     shutil.copy2(C.ROOT / "controls.ini", INI_DST)

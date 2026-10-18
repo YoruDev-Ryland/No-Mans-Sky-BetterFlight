@@ -37,7 +37,7 @@ for field, spec in BM.GLOBAL_TUNING.items():
 
 out = HERE / "src" / "flight_tuning.inc"
 text = "\n".join(lines) + "\n"
-if not out.exists() or out.read_text() != text:
-    out.write_text(text)
+if not out.exists() or out.read_bytes() != text.encode("utf-8"):
+    out.write_bytes(text.encode("utf-8"))      # LF on every OS
 n_engine = sum(len(f) for f in BM.ENGINE_TUNING.values())
 print(f"flight tuning: {n_engine} engine fields x every control block, {len(BM.GLOBAL_TUNING)} globals -> {out.name}")

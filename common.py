@@ -2,13 +2,23 @@
 import json, os, re, shutil, subprocess, sys, urllib.request
 from pathlib import Path
 
+WINDOWS = sys.platform == "win32"
+
+# Windows consoles and redirected output may not be UTF-8: never crash on a character.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(errors="replace")
+
 ROOT   = Path(__file__).resolve().parent
 WORK   = ROOT / "work"
 TOOLS  = ROOT / "tools"
 MBIN_DIR = TOOLS / "mbin"
-MBINC  = MBIN_DIR / "MBINCompiler-linux"
-HGPAK  = TOOLS / "hgpaktool"
+# MBINCompiler release assets per platform: the compiler, then its library.
+MBIN_ASSETS = ("MBINCompiler.exe", "libMBIN.dll") if WINDOWS else ("MBINCompiler-linux", "libMBIN-linux.so")
+MBINC  = MBIN_DIR / MBIN_ASSETS[0]
+HGPAK  = TOOLS / ("hgpaktool.exe" if WINDOWS else "hgpaktool")
 DOTNET = Path.home() / ".dotnet"
+DOTNET_EXE = DOTNET / ("dotnet.exe" if WINDOWS else "dotnet")
 STATE  = TOOLS / "toolchain.json"
 
 APPID  = "275850"
@@ -18,23 +28,59 @@ DL     = "https://github.com/monkeyman192/MBINCompiler/releases/download"
 
 def env():
     return dict(os.environ, DOTNET_ROOT=str(DOTNET),
-                PATH=f"{DOTNET}:{os.environ['PATH']}")
+                PATH=f"{DOTNET}{os.pathsep}{os.environ.get('PATH', '')}")
 
 
 def run(cmd, **kw):
-    return subprocess.run([str(c) for c in cmd], env=env(),
-                          capture_output=True, text=True, **kw)
+    return subprocess.run([str(c) for c in cmd], env=env(), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace", **kw)
+
+
+def game_running():
+    """Is No Man's Sky running? (Windows: tasklist. Linux/Proton: the Wine process name.)"""
+    if WINDOWS:
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq NMS.exe", "/NH"],
+                           capture_output=True, text=True, errors="replace")
+        return "NMS.exe" in r.stdout
+    r = subprocess.run(["pgrep", "-x", "NMS.exe"], capture_output=True, text=True)
+    return bool(r.stdout.strip())
 
 
 # --------------------------------------------------------------- game discovery
+def _steam_roots():
+    if not WINDOWS:
+        return [Path.home()/".steam/steam", Path.home()/".local/share/Steam"]
+    roots = []
+    import winreg
+    for hive, key, value in ((winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+                             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+                             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath")):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                roots.append(Path(winreg.QueryValueEx(k, value)[0]))
+        except OSError:
+            pass
+    roots.append(Path(r"C:\Program Files (x86)\Steam"))
+    return roots
+
+
 def steam_libraries():
     libs = []
-    for base in (Path.home()/".steam/steam", Path.home()/".local/share/Steam"):
+    for base in _steam_roots():
         vdf = base/"steamapps"/"libraryfolders.vdf"
-        if vdf.exists():
+        if vdf.exists() and base not in libs:
             libs.append(base)
-            libs += [Path(m) for m in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text())]
+            for m in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text(errors="replace")):
+                p = Path(m.replace("\\\\", "\\"))       # vdf escapes Windows backslashes
+                if p not in libs:
+                    libs.append(p)
     return libs
+
+
+def _game_steamapps():
+    """The steamapps folder the game is actually installed in, then every known library."""
+    own = GAME.parent.parent                             # .../steamapps/common/No Man's Sky
+    return [own] + [lib/"steamapps" for lib in steam_libraries() if lib/"steamapps" != own]
 
 
 def find_game():
@@ -56,8 +102,8 @@ MODS    = GAME/"GAMEDATA"/"MODS"
 def game_build():
     """Steam buildid, plus the in-game build number from the telemetry log."""
     build_id = None
-    for lib in steam_libraries():
-        acf = lib/"steamapps"/f"appmanifest_{APPID}.acf"
+    for apps in _game_steamapps():
+        acf = apps/f"appmanifest_{APPID}.acf"
         if acf.exists():
             m = re.search(r'"buildid"\s+"(\d+)"', acf.read_text())
             if m:
@@ -74,8 +120,8 @@ def game_build():
 
 
 def update_in_progress():
-    for lib in steam_libraries():
-        acf = lib/"steamapps"/f"appmanifest_{APPID}.acf"
+    for apps in _game_steamapps():
+        acf = apps/f"appmanifest_{APPID}.acf"
         if acf.exists():
             flags = re.search(r'"StateFlags"\s+"(\d+)"', acf.read_text())
             if flags and int(flags.group(1)) != 4:      # 4 == fully installed
@@ -105,7 +151,7 @@ def releases():
 
 def fetch_version(tag, dest):
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("MBINCompiler-linux", "libMBIN-linux.so"):
+    for name in MBIN_ASSETS:
         out = dest/name
         try:
             data = _get(f"{DL}/{tag}/{name}", tries=3)
@@ -114,7 +160,7 @@ def fetch_version(tag, dest):
         if len(data) < 100_000:          # 404 page or truncated
             return False
         out.write_bytes(data)
-    (dest/"MBINCompiler-linux").chmod(0o755)
+    (dest/MBIN_ASSETS[0]).chmod(0o755)
     return True
 
 
@@ -173,5 +219,5 @@ def require_current_toolchain():
             f"\n  Toolchain not validated for the installed game.\n"
             f"    validated for : steam buildid {st.get('steam_buildid')} / NMS {st.get('nms_build')}\n"
             f"    installed now : steam buildid {bid} / NMS {nms}\n\n"
-            f"  Run:  ./setup_tools.py\n")
+            f"  Run:  python3 setup_tools.py\n")
     return st

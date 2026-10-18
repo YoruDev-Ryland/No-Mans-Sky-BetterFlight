@@ -21,19 +21,22 @@ REL     = C.ROOT / "release"
 
 
 def sh(cmd):
-    r = subprocess.run([str(c) for c in cmd], cwd=C.ROOT, capture_output=True, text=True)
+    if str(cmd[0]).endswith(".py"):          # Windows can't execute .py files directly
+        cmd = [sys.executable, *cmd]
+    r = subprocess.run([str(c) for c in cmd], cwd=C.ROOT, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         sys.exit(f"\n  step failed: {' '.join(map(str, cmd))}\n{r.stdout}\n{r.stderr}")
     return r.stdout
 
 
 def dll_version():
-    src = (C.ROOT / "native" / "src" / "betterflight.c").read_text()
+    src = (C.ROOT / "native" / "src" / "betterflight.c").read_text(encoding="utf-8")
     return re.search(r'#define BF_VERSION "([^"]+)"', src).group(1)
 
 
 def release_ini():
-    s = (C.ROOT / "controls.ini").read_text()
+    s = (C.ROOT / "controls.ini").read_text(encoding="utf-8")
     s = re.sub(r"^(Debug\s*=\s*)\d+", r"\g<1>0", s, flags=re.M)
     if not re.search(r"^Debug\s*=\s*0\s*$", s, re.M):
         sys.exit("could not force Debug = 0 in the release ini")
@@ -53,11 +56,11 @@ def main():
     print(f"Better Flight {VERSION}  |  Steam build {bid}  |  toolchain {st['mbincompiler']}\n")
     print("  building control remap ...");      sh([C.ROOT / "controls_mod.py", "--build"])
     print("  flight simulator tests ...")
-    out = sh([C.ROOT / "native" / "build.sh", "simtest"])
+    out = sh([C.ROOT / "native" / "build.py", "simtest"])
     if "SIMTEST PASS" not in out:
         sys.exit("flight simulator tests failed:\n" + out)
     print("  building + self-testing DLL ...")
-    out = sh([C.ROOT / "native" / "build.sh", "selftest"])
+    out = sh([C.ROOT / "native" / "build.py", "selftest"])
     if "SELFTEST PASS" not in out:
         sys.exit("DLL self-test failed:\n" + out)
 
@@ -81,9 +84,11 @@ def main():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    (stage / "Binaries" / "BetterFlight.ini").write_text(release_ini())
+    # LF and UTF-8 on every OS: the release must not depend on where it was built
+    (stage / "Binaries" / "BetterFlight.ini").write_bytes(release_ini().encode("utf-8"))
     readme = stage / "BetterFlight-docs" / "README.txt"
-    readme.write_text(readme.read_text().replace("{VERSION}", VERSION).replace("{BUILD}", bid))
+    text = readme.read_text(encoding="utf-8").replace("{VERSION}", VERSION).replace("{BUILD}", bid)
+    readme.write_bytes(text.encode("utf-8"))
 
     DIST.mkdir(exist_ok=True)
     zpath = DIST / f"{name}-steambuild{bid}.zip"
